@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Semantic Search Extension</title>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 400px;
+      font-family: Arial, sans-serif;
+      padding: 16px;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 400px;
+    }
+    h1 {
+      font-size: 18px;
+      margin-top: 0;
+      color: #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #4285f4;
+      padding: 12px 16px;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 16px;
+    }
+    .status-indicator {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .status-off {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+    .status-on {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+    .tabs {
+      display: flex;
+      margin-bottom: 15px;
+      border-bottom: 1px solid #ddd;
+    }
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-bottom: none;
+      margin-right: 5px;
+      border-radius: 4px 4px 0 0;
+    }
+    .tab.active {
+      background: #fff;
+      border-bottom: 1px solid #fff;
+      margin-bottom: -1px;
+      font-weight: bold;
+    }
+    .tab-content {
+      display: none;
+      flex: 1;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #4285f4;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 5px;
+    }
+    button:hover {
+      background: #3367d6;
+    }
+    .result-item {
+      padding: 10px;
+      margin-bottom: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #f9f9f9;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .result-item:hover {
+      background: #f0f0f0;
+    }
+    .result-title {
+      font-weight: bold;
+      color: #1a0dab;
+      margin-bottom: 5px;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .result-text {
+      max-height: 100px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 5px;
+      font-size: 13px;
+      color: #555;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+    .result-url {
+      font-size: 12px;
+      color: #006621;
+      text-decoration: none;
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .result-url:hover {
+      text-decoration: underline;
+    }
+    textarea {
+      width: 100%;
+      height: 150px;
+      margin-bottom: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .stats {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 10px;
+    }
+    .notification-area {
+      margin-top: auto;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+      background-color: #f8f9fa;
+      max-height: 200px;
+      overflow-y: auto;
+      position: sticky;
+      bottom: 0;
+      z-index: 1000;
+    }
+    .notification {
+      font-size: 12px;
+      padding: 8px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: slideIn 0.3s ease-out;
+    }
+    @keyframes slideIn {
+      from {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    .notification.info {
+      background-color: #e3f2fd;
+      color: #1565c0;
+      border-left: 4px solid #1565c0;
+    }
+    .notification.success {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+      border-left: 4px solid #2e7d32;
+    }
+    .notification.error {
+      background-color: #ffebee;
+      color: #c62828;
+      border-left: 4px solid #c62828;
+    }
+    .notification .timestamp {
+      font-size: 10px;
+      color: #666;
+      margin-left: 8px;
+    }
+    .notification .close {
+      cursor: pointer;
+      color: #666;
+      margin-left: 8px;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .notification .close:hover {
+      color: #333;
+    }
+    .search-controls {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+    
+    .highlight-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: #666;
+      cursor: pointer;
+    }
+    
+    .highlight-label input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+    
+    .search-result-highlight {
+      background-color: yellow;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>
+    Semantic Search Extension
+    <span id="backend-status" class="status-indicator status-off">LLM Service: OFF</span>
+  </h1>
+  
+  <div class="tabs">
+    <div class="tab active" data-tab="search">Search</div>
+    <div class="tab" data-tab="settings">Settings</div>
+    <div class="tab" data-tab="export">Export</div>
+  </div>
+  
+  <div class="tab-content active" id="search-tab">
+    <input type="text" id="search-input" placeholder="Enter your search query...">
+    <div class="search-controls">
+      <button id="search-button">Search</button>
+      <label class="highlight-label">
+        <input type="checkbox" id="highlight-checkbox">
+        Highlight searched text
+      </label>
+    </div>
+    
+    <div class="stats" id="search-stats"></div>
+    
+    <div id="search-results"></div>
+  </div>
+  
+  <div class="tab-content" id="settings-tab">
+    <h3>Confidential Sites</h3>
+    <p>Enter one site pattern per line. URLs matching these patterns will be skipped.</p>
+    <textarea id="confidential-sites"></textarea>
+    <button id="save-settings">Save Settings</button>
+  </div>
+  
+  <div class="tab-content" id="export-tab">
+    <p>Download the current FAISS index and URL mapping.</p>
+    <button id="download-index">Download Index</button>
+    <div class="stats" id="export-stats"></div>
+  </div>
+  
+  <div class="notification-area" id="notification-area">
+    <!-- Notifications will be added here dynamically -->
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html> 
