@@ -17,7 +17,7 @@ const notificationArea = document.getElementById('notification-area');
 console.log('Popup script loaded');
 
 // Constants
-const NOTIFICATION_DURATION = 5000; // 5 seconds in milliseconds
+const NOTIFICATION_DURATION = 3000; // 3 seconds in milliseconds
 
 // Tab switching functionality
 tabs.forEach(tab => {
@@ -722,7 +722,7 @@ function updateStatus(status, url, error = null) {
                 statusText.textContent = 'Ready to search';
                 errorElement.textContent = '';
                 errorElement.style.display = 'none';
-            }, 3000);
+            }, NOTIFICATION_DURATION);
             break;
             
         default:
