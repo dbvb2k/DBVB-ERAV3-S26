@@ -56,83 +56,92 @@ saveSettingsButton.addEventListener('click', saveConfidentialSites);
 // Export functionality
 downloadIndexButton.addEventListener('click', downloadIndex);
 
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('Popup received message:', message);
+// Initialize popup
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Popup DOM loaded');
     
-    if (message.type === 'indexing_status') {
-        console.log('Received indexing status:', message.status);
-        let notificationType = 'info';
-        let notificationMessage = '';
-        
-        switch (message.status) {
-            case 'started':
-                notificationMessage = `Started indexing: ${message.url}`;
-                notificationType = 'info';
-                break;
-            case 'completed':
-                notificationMessage = `Successfully indexed: ${message.url}`;
-                notificationType = 'success';
-                break;
-            case 'error':
-                notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
-                notificationType = 'error';
-                break;
-            case 'skipped':
-                notificationMessage = `Skipped confidential page: ${message.url}`;
-                notificationType = 'info';
-                break;
-            default:
-                notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
-                notificationType = 'info';
-        }
-        
-        addNotification(notificationMessage, notificationType);
-        sendResponse({ received: true });
+    // Initialize notification area
+    const notificationArea = document.getElementById('notification-area');
+    if (!notificationArea) {
+        console.error('Notification area not found in DOM');
+    } else {
+        console.log('Notification area initialized');
     }
-    return true; // Keep the message channel open for async response
-});
 
-// Also listen for window messages (for postMessage)
-window.addEventListener('message', (event) => {
-    // Verify the message is from our extension
-    if (event.source !== window) return;
-    
-    const message = event.data;
-    if (message.type === 'indexing_status') {
-        console.log('Popup received postMessage:', message.status);
-        let notificationType = 'info';
-        let notificationMessage = '';
-        
-        switch (message.status) {
-            case 'started':
-                notificationMessage = `Started indexing: ${message.url}`;
-                notificationType = 'info';
-                break;
-            case 'completed':
-                notificationMessage = `Successfully indexed: ${message.url}`;
-                notificationType = 'success';
-                break;
-            case 'error':
-                notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
-                notificationType = 'error';
-                break;
-            case 'skipped':
-                notificationMessage = `Skipped confidential page: ${message.url}`;
-                notificationType = 'info';
-                break;
-            default:
-                notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
-                notificationType = 'info';
+    // Load settings when opening the popup
+    loadConfidentialSites();
+
+    // Initialize the extension
+    chrome.runtime.sendMessage({ action: 'init' }, response => {
+        if (response && response.success) {
+            console.log('Extension initialized successfully');
+            addNotification('Extension initialized successfully', 'success');
+        } else {
+            console.error('Failed to initialize extension:', response?.error || 'Unknown error');
+            addNotification('Failed to initialize extension', 'error');
         }
+    });
+
+    // Connect to background script
+    const port = chrome.runtime.connect({ name: 'popup' });
+    
+    // Listen for messages from background script
+    port.onMessage.addListener((message) => {
+        console.log('Received message from background:', message);
         
-        addNotification(notificationMessage, notificationType);
-    }
+        if (message.type === 'indexing_status') {
+            // Update the status display
+            updateStatus(message.status, message.url, message.error);
+            
+            // Add notification
+            let notificationType = 'info';
+            let notificationMessage = '';
+            
+            switch (message.status) {
+                case 'started':
+                    notificationMessage = `Started indexing: ${message.url}`;
+                    notificationType = 'info';
+                    break;
+                case 'completed':
+                    notificationMessage = `Successfully indexed: ${message.url}`;
+                    notificationType = 'success';
+                    break;
+                case 'error':
+                    notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
+                    notificationType = 'error';
+                    break;
+                case 'skipped':
+                    notificationMessage = `Skipped confidential page: ${message.url}`;
+                    notificationType = 'error';
+                    // Ensure the error message is displayed
+                    if (message.error) {
+                        const errorElement = document.getElementById('error-message');
+                        if (errorElement) {
+                            errorElement.textContent = message.error;
+                            errorElement.style.display = 'block';
+                            console.log('Displayed error message for confidential site:', message.error);
+                        }
+                    }
+                    break;
+                default:
+                    notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
+                    notificationType = 'info';
+            }
+            
+            // Add notification
+            addNotification(notificationMessage, notificationType);
+        }
+    });
+    
+    // Handle disconnection
+    port.onDisconnect.addListener(() => {
+        console.log('Disconnected from background script');
+    });
 });
 
 // Function to add a notification
 function addNotification(message, type = 'info') {
-    console.log('Adding notification:', message, type);
+    console.log('Adding notification:', message, 'Type:', type);
     
     const notificationArea = document.getElementById('notification-area');
     if (!notificationArea) {
@@ -162,11 +171,13 @@ function addNotification(message, type = 'info') {
     
     // Add to the top of the notification area
     notificationArea.insertBefore(notification, notificationArea.firstChild);
+    console.log('Notification added to DOM');
     
-    // Auto-remove after 10 seconds
+    // Auto-remove after duration
     setTimeout(() => {
         if (notification.parentNode === notificationArea) {
             notification.remove();
+            console.log('Notification auto-removed');
         }
     }, NOTIFICATION_DURATION);
 }
@@ -179,6 +190,7 @@ async function checkBackendStatus() {
       backendStatus.textContent = 'LLM Service: ON';
       backendStatus.classList.remove('status-off');
       backendStatus.classList.add('status-on');
+      return true;
     } else {
       throw new Error('Backend not healthy');
     }
@@ -187,6 +199,7 @@ async function checkBackendStatus() {
     backendStatus.textContent = 'LLM Service: OFF';
     backendStatus.classList.remove('status-on');
     backendStatus.classList.add('status-off');
+    return false;
   }
 }
 
@@ -203,6 +216,13 @@ async function performSearch() {
   
   if (!query) {
     searchResults.innerHTML = '<p>Please enter a search query.</p>';
+    return;
+  }
+
+  // Check LLM service status before proceeding
+  const isServiceRunning = await checkBackendStatus();
+  if (!isServiceRunning) {
+    alert('LLM Service is down. Please start the service first before searching.');
     return;
   }
   
@@ -263,55 +283,97 @@ async function performSearch() {
             // Get the active tab
             const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
             
-            // If we're on the same page, highlight the text
+            // If we're on the same page
             if (activeTab.url === result.url) {
               if (shouldHighlight) {
-                // Try to inject the content script first
+                // Inject content script first
                 try {
                   await chrome.scripting.executeScript({
                     target: { tabId: activeTab.id },
                     files: ['content.js']
                   });
+                  
+                  // Send highlight message after content script is injected
+                  chrome.tabs.sendMessage(activeTab.id, {
+                    action: 'highlightText',
+                    text: query
+                  }, (response) => {
+                    if (chrome.runtime.lastError) {
+                      console.error('Error highlighting:', chrome.runtime.lastError);
+                    } else if (response && response.matches) {
+                      console.log(`Highlighted ${response.matches} matches`);
+                    }
+                  });
                 } catch (err) {
                   console.log('Content script already injected or injection failed:', err);
                 }
-                
-                // Send highlight message
-                chrome.tabs.sendMessage(activeTab.id, {
-                  action: 'highlightText',
-                  text: query
-                }, (response) => {
-                  if (chrome.runtime.lastError) {
-                    console.error('Error highlighting:', chrome.runtime.lastError);
-                  } else if (response && response.matches) {
-                    console.log(`Highlighted ${response.matches} matches`);
-                  }
-                });
               }
             } else {
-              // Navigate to the page and set up a listener for when it loads
+              // Navigate to the page
               const tab = await chrome.tabs.create({ url: result.url, active: true });
               
-              // Wait for the page to load before highlighting
-              chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-                if (tabId === tab.id && info.status === 'complete') {
-                  // Remove the listener
-                  chrome.tabs.onUpdated.removeListener(listener);
-                  
-                  if (shouldHighlight) {
+              if (shouldHighlight) {
+                // Store the search query for highlighting after page load
+                chrome.storage.local.set({ pendingHighlight: { text: query } });
+                
+                // Wait for the page to load before highlighting
+                chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+                  if (tabId === tab.id && info.status === 'complete') {
+                    // Remove the listener
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    
                     // Inject content script and highlight
                     chrome.scripting.executeScript({
                       target: { tabId: tab.id },
                       files: ['content.js']
                     }).then(() => {
-                      chrome.tabs.sendMessage(tab.id, {
-                        action: 'highlightText',
-                        text: query
-                      });
-                    }).catch(err => console.error('Error injecting content script:', err));
+                      // Add a small delay to ensure content script is initialized
+                      setTimeout(() => {
+                        chrome.tabs.sendMessage(tab.id, {
+                          action: 'highlightText',
+                          text: query
+                        }, (response) => {
+                          if (chrome.runtime.lastError) {
+                            console.error('Error highlighting:', chrome.runtime.lastError);
+                            // Retry highlighting after a longer delay if it fails
+                            setTimeout(() => {
+                              chrome.tabs.sendMessage(tab.id, {
+                                action: 'highlightText',
+                                text: query
+                              }, (retryResponse) => {
+                                if (chrome.runtime.lastError) {
+                                  console.error('Error highlighting on retry:', chrome.runtime.lastError);
+                                } else if (retryResponse && retryResponse.matches) {
+                                  console.log(`Highlighted ${retryResponse.matches} matches on retry`);
+                                }
+                              });
+                            }, 1000);
+                          } else if (response && response.matches) {
+                            console.log(`Highlighted ${response.matches} matches`);
+                          }
+                        });
+                      }, 500);
+                    }).catch(err => {
+                      console.error('Error injecting content script:', err);
+                      // Retry content script injection after a delay
+                      setTimeout(() => {
+                        chrome.scripting.executeScript({
+                          target: { tabId: tab.id },
+                          files: ['content.js']
+                        }).then(() => {
+                          // Try highlighting again after content script is injected
+                          setTimeout(() => {
+                            chrome.tabs.sendMessage(tab.id, {
+                              action: 'highlightText',
+                              text: query
+                            });
+                          }, 500);
+                        }).catch(retryErr => console.error('Error injecting content script on retry:', retryErr));
+                      }, 1000);
+                    });
                   }
-                }
-              });
+                });
+              }
             }
           } catch (error) {
             console.error('Error handling result click:', error);
@@ -342,45 +404,77 @@ chrome.storage.local.get(['highlightEnabled'], function(result) {
 });
 
 // Function to load confidential sites
-function loadConfidentialSites() {
-  console.log('Loading confidential sites list');
-  
-  chrome.runtime.sendMessage(
-    { action: 'getConfidentialSites' },
-    response => {
-      console.log('Got confidential sites response:', response);
-      
-      if (response && response.sites) {
-        confidentialSites.value = response.sites.join('\n');
-        console.log(`Loaded ${response.sites.length} confidential sites`);
-      } else {
-        console.error('Failed to load confidential sites');
-      }
+async function loadConfidentialSites() {
+    console.log('Loading confidential sites list');
+    
+    try {
+        const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+                { action: 'getConfidentialSites' },
+                response => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Error getting confidential sites:', chrome.runtime.lastError);
+                        resolve({ sites: [] });
+                    } else {
+                        resolve(response);
+                    }
+                }
+            );
+        });
+        
+        console.log('Got confidential sites response:', response);
+        
+        if (response && Array.isArray(response.sites)) {
+            confidentialSites.value = response.sites.join('\n');
+            console.log(`Loaded ${response.sites.length} confidential sites`);
+        } else {
+            console.error('Invalid response format for confidential sites');
+            confidentialSites.value = '';
+        }
+    } catch (error) {
+        console.error('Error loading confidential sites:', error);
+        confidentialSites.value = '';
     }
-  );
 }
 
 // Function to save confidential sites
-function saveConfidentialSites() {
-  const sites = confidentialSites.value
-    .split('\n')
-    .map(site => site.trim())
-    .filter(site => site.length > 0);
-  
-  console.log(`Saving ${sites.length} confidential sites`);
-  
-  chrome.runtime.sendMessage(
-    { action: 'updateConfidentialSites', sites: sites },
-    response => {
-      console.log('Save confidential sites response:', response);
-      
-      if (response && response.success) {
-        console.log('Settings saved successfully');
-      } else {
-        console.error('Failed to save settings:', response?.error || 'Unknown error');
-      }
+async function saveConfidentialSites() {
+    const sites = confidentialSites.value
+        .split('\n')
+        .map(site => site.trim())
+        .filter(site => site.length > 0);
+    
+    console.log(`Saving ${sites.length} confidential sites`);
+    
+    try {
+        const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+                { action: 'updateConfidentialSites', sites: sites },
+                response => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Error saving confidential sites:', chrome.runtime.lastError);
+                        resolve({ success: false, error: chrome.runtime.lastError.message });
+                    } else {
+                        resolve(response);
+                    }
+                }
+            );
+        });
+        
+        console.log('Save confidential sites response:', response);
+        
+        if (response && response.success) {
+            console.log('Settings saved successfully');
+            addNotification('Settings saved successfully', 'success');
+        } else {
+            const errorMsg = response?.error || 'Unknown error';
+            console.error('Failed to save settings:', errorMsg);
+            addNotification(`Failed to save settings: ${errorMsg}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        addNotification(`Error saving settings: ${error.message}`, 'error');
     }
-  );
 }
 
 // Function to download index
@@ -535,63 +629,57 @@ async function regenerateTestData() {
   }
 }
 
-// Initialize popup
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Popup DOM loaded');
+// Function to update status display
+function updateStatus(status, url, error = null) {
+    const statusElement = document.getElementById('status');
+    const statusText = document.getElementById('status-text');
+    const errorElement = document.getElementById('error-message');
     
-    // Initialize notification area
-    const notificationArea = document.getElementById('notification-area');
-    if (!notificationArea) {
-        console.error('Notification area not found in DOM');
-    } else {
-        console.log('Notification area initialized');
+    if (!statusElement || !statusText || !errorElement) {
+        console.error('Status elements not found in DOM');
+        return;
     }
-
-    // Initialize the extension
-    chrome.runtime.sendMessage({ action: 'init' }, response => {
-        if (response && response.success) {
-            console.log('Extension initialized successfully');
-            addNotification('Extension initialized successfully', 'success');
-        } else {
-            console.error('Failed to initialize extension:', response?.error || 'Unknown error');
-            addNotification('Failed to initialize extension', 'error');
-        }
-    });
-
-    // Set up message listener for indexing status
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log('Popup received message:', message);
-        
-        if (message.type === 'indexing_status') {
-            console.log('Received indexing status:', message.status);
-            let notificationType = 'info';
-            let notificationMessage = '';
+    
+    // Clear previous status
+    statusElement.className = '';
+    statusText.textContent = '';
+    errorElement.textContent = '';
+    errorElement.style.display = 'none';
+    
+    // Update status based on type
+    switch (status) {
+        case 'started':
+            statusElement.classList.add('indexing');
+            statusText.textContent = 'Indexing page...';
+            break;
             
-            switch (message.status) {
-                case 'started':
-                    notificationMessage = `Started indexing: ${message.url}`;
-                    notificationType = 'info';
-                    break;
-                case 'completed':
-                    notificationMessage = `Successfully indexed: ${message.url}`;
-                    notificationType = 'success';
-                    break;
-                case 'error':
-                    notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
-                    notificationType = 'error';
-                    break;
-                case 'skipped':
-                    notificationMessage = `Skipped confidential page: ${message.url}`;
-                    notificationType = 'error';
-                    break;
-                default:
-                    notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
-                    notificationType = 'info';
+        case 'completed':
+            statusElement.classList.add('completed');
+            statusText.textContent = 'Page indexed successfully!';
+            break;
+            
+        case 'error':
+            statusElement.classList.add('error');
+            statusText.textContent = 'Error indexing page';
+            if (error) {
+                errorElement.textContent = error;
+                errorElement.style.display = 'block';
             }
+            break;
             
-            addNotification(notificationMessage, notificationType);
-            sendResponse({ received: true });
-        }
-        return true; // Keep the message channel open for async response
-    });
-}); 
+        case 'skipped':
+            statusElement.classList.add('skipped');
+            statusText.textContent = 'Page skipped';
+            if (error) {
+                errorElement.textContent = error;
+                errorElement.style.display = 'block';
+            }
+            break;
+            
+        default:
+            statusElement.classList.add('idle');
+            statusText.textContent = 'Ready to search';
+    }
+    
+    console.log('Updated status display:', status, 'for URL:', url);
+} 

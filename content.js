@@ -77,77 +77,137 @@ Content: ${mainContent}
 
 // Function to highlight text on the page
 function highlightText(searchText) {
-    if (!searchText) return 0;
+    if (!searchText) {
+        console.log('No search text provided');
+        return 0;
+    }
     
-    // Remove existing highlights first
-    removeHighlights();
+    console.log('Starting highlight for text:', searchText);
     
-    const searchRegex = new RegExp(escapeRegExp(searchText), 'gi');
-    let matches = 0;
-    
-    // Create a TreeWalker to find all text nodes
-    const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        {
-            acceptNode: function(node) {
-                // Skip script and style nodes
-                const parent = node.parentNode;
-                if (parent.nodeName === 'SCRIPT' || 
-                    parent.nodeName === 'STYLE' || 
-                    parent.nodeName === 'NOSCRIPT' ||
-                    parent.classList.contains('search-result-highlight')) {
-                    return NodeFilter.FILTER_REJECT;
+    try {
+        // Remove existing highlights first
+        removeHighlights();
+        
+        // Create a temporary div to hold the search text for exact matching
+        const tempDiv = document.createElement('div');
+        tempDiv.textContent = searchText;
+        const exactSearchText = tempDiv.textContent;
+        
+        const searchRegex = new RegExp(escapeRegExp(exactSearchText), 'gi');
+        let matchCount = 0;
+        
+        // Get all text nodes in the document body
+        const allNodes = [];
+        const walk = document.createTreeWalker(
+            document.body,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: function(node) {
+                    // Skip script, style, and already highlighted nodes
+                    const parent = node.parentNode;
+                    if (!parent) return NodeFilter.FILTER_REJECT;
+                    
+                    if (parent.nodeName === 'SCRIPT' || 
+                        parent.nodeName === 'STYLE' || 
+                        parent.nodeName === 'NOSCRIPT' ||
+                        parent.classList.contains('search-result-highlight') ||
+                        parent.classList.contains('search-match')) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    
+                    return NodeFilter.FILTER_ACCEPT;
                 }
-                return NodeFilter.FILTER_ACCEPT;
+            }
+        );
+        
+        while (walk.nextNode()) {
+            allNodes.push(walk.currentNode);
+        }
+        
+        // Process each text node
+        allNodes.forEach((textNode) => {
+            const text = textNode.textContent;
+            if (!text.match(searchRegex)) return;
+            
+            const fragment = document.createDocumentFragment();
+            let lastIndex = 0;
+            let match;
+            
+            searchRegex.lastIndex = 0; // Reset regex state
+            
+            while ((match = searchRegex.exec(text)) !== null) {
+                // Add text before the match
+                if (match.index > lastIndex) {
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                }
+                
+                // Create highlighted match
+                const span = document.createElement('span');
+                span.className = 'search-match';
+                span.style.backgroundColor = '#ffeb3b';
+                span.style.color = '#000';
+                span.style.fontWeight = 'bold';
+                span.style.padding = '2px 4px';
+                span.style.borderRadius = '3px';
+                span.style.margin = '0 1px';
+                span.textContent = match[0];
+                
+                fragment.appendChild(span);
+                lastIndex = match.index + match[0].length;
+                matchCount++;
+            }
+            
+            // Add remaining text
+            if (lastIndex < text.length) {
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+            
+            // Replace original text node with our fragment
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
+        
+        console.log(`Total matches found: ${matchCount}`);
+        
+        // Scroll to first match if any found
+        if (matchCount > 0) {
+            const firstMatch = document.querySelector('.search-match');
+            if (firstMatch) {
+                firstMatch.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
             }
         }
-    );
-    
-    let node;
-    const textNodes = [];
-    
-    // First, collect all matching text nodes
-    while (node = walker.nextNode()) {
-        const content = node.textContent;
-        if (searchRegex.test(content)) {
-            textNodes.push(node);
-        }
+        
+        return matchCount;
+    } catch (error) {
+        console.error('Error in highlightText:', error);
+        return 0;
     }
-    
-    // Then, highlight all matches
-    textNodes.forEach(node => {
-        const content = node.textContent;
-        const span = document.createElement('span');
-        span.className = 'search-result-highlight';
-        span.innerHTML = content.replace(searchRegex, match => {
-            matches++;
-            return `<mark class="search-match">${match}</mark>`;
-        });
-        node.parentNode.replaceChild(span, node);
-    });
-    
-    // If we found matches, scroll to the first one
-    if (matches > 0) {
-        const firstMatch = document.querySelector('.search-match');
-        if (firstMatch) {
-            firstMatch.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-            });
-        }
-    }
-    
-    return matches;
 }
 
 // Function to remove existing highlights
 function removeHighlights() {
+    console.log('Removing existing highlights');
+    
+    // Remove spans with search-match class
+    const matches = document.querySelectorAll('.search-match');
+    matches.forEach(match => {
+        const parent = match.parentNode;
+        if (parent) {
+            parent.replaceChild(document.createTextNode(match.textContent), match);
+            parent.normalize();
+        }
+    });
+    
+    // Also remove any search-result-highlight spans
     const highlights = document.querySelectorAll('.search-result-highlight');
     highlights.forEach(highlight => {
         const parent = highlight.parentNode;
-        parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
-        parent.normalize();
+        if (parent) {
+            parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
+            parent.normalize();
+        }
     });
 }
 
@@ -165,10 +225,18 @@ if (!document.querySelector('#semantic-search-styles')) {
             background-color: #ffeb3b;
             color: #000;
             font-weight: bold;
-            padding: 2px;
-            border-radius: 2px;
-            box-shadow: 0 0 2px rgba(0,0,0,0.2);
+            padding: 2px 4px;
+            border-radius: 3px;
+            box-shadow: 0 0 3px rgba(0,0,0,0.2);
             display: inline-block;
+            margin: 0 1px;
+            text-decoration: none;
+            position: relative;
+            z-index: 1;
+        }
+        .search-result-highlight mark.search-match:hover {
+            background-color: #fff176;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
         }
     `;
     document.head.appendChild(style);
@@ -188,8 +256,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         
         if (message.action === 'highlightText') {
             console.log('Highlighting text:', message.text);
-            const matches = highlightText(message.text);
-            sendResponse({ matches });
+            // Ensure we're working with the DOM after it's fully loaded
+            if (document.readyState === 'complete') {
+                const matches = highlightText(message.text);
+                console.log(`Highlighting complete. Found ${matches} matches.`);
+                sendResponse({ matches });
+            } else {
+                // Wait for DOM to be ready
+                window.addEventListener('load', () => {
+                    const matches = highlightText(message.text);
+                    console.log(`Highlighting complete. Found ${matches} matches.`);
+                    sendResponse({ matches });
+                });
+            }
             return true;
         }
         
@@ -210,8 +289,46 @@ console.log('Content script initialized');
 checkExtensionConnection().then(isConnected => {
     if (isConnected) {
         console.log('Successfully connected to extension');
+        
+        // Check for pending highlight
+        chrome.runtime.sendMessage({ action: 'getPendingHighlight' }, response => {
+            if (response && response.text) {
+                console.log('Found pending highlight:', response.text);
+                highlightText(response.text);
+            }
+        });
     } else {
         console.log('Failed to connect to extension, will retry later');
         setTimeout(checkExtensionConnection, RECONNECT_DELAY);
     }
+});
+
+// Add keyboard event listener for Ctrl+F
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault(); // Prevent default browser search
+        const searchText = window.getSelection().toString() || prompt('Enter text to search:');
+        if (searchText) {
+            const matchCount = highlightText(searchText);
+            if (matchCount === 0) {
+                alert('No matches found');
+            }
+        }
+    }
+});
+
+// Add a mutation observer to handle dynamic content
+const observer = new MutationObserver((mutations) => {
+    // Check if we have any pending highlight requests
+    chrome.runtime.sendMessage({ action: 'getPendingHighlight' }, response => {
+        if (response && response.text) {
+            highlightText(response.text);
+        }
+    });
+});
+
+// Start observing the document with the configured parameters
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
 }); 

@@ -10,6 +10,9 @@ let isInitialized = false;
 let librariesLoaded = false;
 const BACKEND_URL = 'http://localhost:5000/api';  // Change this in production
 
+// Add a Set to track pages being indexed
+const indexingInProgress = new Set();
+
 // Log the startup
 console.log('Background script started!');
 
@@ -275,39 +278,41 @@ async function initializeFaissIndex() {
 
 // Check if a URL is confidential
 function isConfidentialSite(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname;
-    
-    // Check if the hostname matches any confidential site
-    for (const site of confidentialSites) {
-      if (hostname.includes(site)) {
-        console.log(`Skipping confidential site: ${url} (matched pattern: ${site})`);
-        return true;
-      }
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname;
+        const pathname = urlObj.pathname;
+        
+        // Check if the hostname matches any confidential site
+        for (const site of confidentialSites) {
+            if (hostname.includes(site) || pathname.includes(site)) {
+                console.log(`Site is confidential: ${url} (matched pattern: ${site})`);
+                return {
+                    isConfidential: true,
+                    matchedPattern: site
+                };
+            }
+        }
+        
+        console.log(`Site is not confidential: ${url}`);
+        return {
+            isConfidential: false,
+            matchedPattern: null
+        };
+    } catch (e) {
+        console.error('Error checking confidential site:', e, url);
+        return {
+            isConfidential: true,
+            matchedPattern: 'Error parsing URL'
+        };
     }
-    
-    // Check if the pathname contains any confidential keywords
-    for (const site of confidentialSites) {
-      if (urlObj.pathname.includes(site)) {
-        console.log(`Skipping confidential site: ${url} (matched pattern in path: ${site})`);
-        return true;
-      }
-    }
-    
-    console.log(`Site is not confidential, processing: ${url}`);
-    return false;
-  } catch (e) {
-    console.error('Error parsing URL:', e, url);
-    return true; // Treat as confidential if there's an error
-  }
 }
 
 // Process page content
 async function processPageContent(url, content) {
   console.log(`Received page for processing: ${url}`);
   
-  if (isConfidentialSite(url)) {
+  if (isConfidentialSite(url).isConfidential) {
     console.log('Skipping confidential site:', url);
     return;
   }
@@ -491,68 +496,52 @@ async function getPageContent(tab) {
     });
 }
 
-// Function to send indexing status to popup
+// Function to send indexing status
 async function sendIndexingStatus(status, url, error = null) {
-    console.log(`Sending indexing status: ${status} for ${url}`);
+    // Don't send duplicate notifications for the same URL and status
+    const statusKey = `${url}-${status}`;
+    if (indexingInProgress.has(statusKey)) {
+        console.log('Skipping duplicate status:', statusKey);
+        return;
+    }
     
-    const message = {
-        type: 'indexing_status',
-        status: status,
-        url: url,
-        error: error
-    };
-
+    indexingInProgress.add(statusKey);
+    
     try {
-        // Try to send message to popup
-        const response = await new Promise((resolve) => {
-            chrome.runtime.sendMessage(message, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.log('Expected error (popup may be closed):', chrome.runtime.lastError.message);
-                    resolve(false);
-                } else {
-                    console.log('Notification sent successfully:', status);
-                    resolve(true);
-                }
-            });
-        });
+        // Create the message object
+        const message = {
+            type: 'indexing_status',
+            status: status,
+            url: url,
+            error: error
+        };
 
-        // If popup is not open, store the message for later
-        if (!response) {
+        // Check if popup is open before sending message
+        const views = chrome.extension.getViews({ type: 'popup' });
+        if (views.length > 0) {
+            // Send to popup
+            await chrome.runtime.sendMessage(message);
+            console.log('Sent status message:', status, 'for URL:', url);
+        } else {
             console.log('Popup not open, storing message for later');
-            // Store the message in chrome.storage.local
-            chrome.storage.local.get(['pendingNotifications'], (result) => {
-                const pendingNotifications = result.pendingNotifications || [];
-                pendingNotifications.push(message);
-                chrome.storage.local.set({ pendingNotifications });
+            // Store the message to be sent when popup opens
+            chrome.storage.local.get(['pendingMessages'], (result) => {
+                const pendingMessages = result.pendingMessages || [];
+                pendingMessages.push(message);
+                chrome.storage.local.set({ pendingMessages });
             });
         }
     } catch (error) {
         console.error('Error sending indexing status:', error);
+        // Don't throw the error, just log it
+        console.log('Failed to send status message, will retry when popup opens');
+    } finally {
+        // Remove from tracking set after a delay
+        setTimeout(() => {
+            indexingInProgress.delete(statusKey);
+        }, 1000);
     }
 }
-
-// Function to check and send pending notifications when popup opens
-function checkPendingNotifications() {
-    chrome.storage.local.get(['pendingNotifications'], (result) => {
-        const pendingNotifications = result.pendingNotifications || [];
-        if (pendingNotifications.length > 0) {
-            console.log(`Found ${pendingNotifications.length} pending notifications`);
-            pendingNotifications.forEach(notification => {
-                chrome.runtime.sendMessage(notification);
-            });
-            // Clear pending notifications
-            chrome.storage.local.set({ pendingNotifications: [] });
-        }
-    });
-}
-
-// Listen for popup opening
-chrome.runtime.onConnect.addListener((port) => {
-    if (port.name === 'popup') {
-        console.log('Popup connected');
-        checkPendingNotifications();
-    }
-});
 
 // Function to index a page
 async function indexPage(tab) {
@@ -561,80 +550,107 @@ async function indexPage(tab) {
         return;
     }
 
-    const url = tab.url;
-    console.log('Starting to index page:', url);
+    // Check if page is already being indexed
+    const statusKey = `${tab.url}-started`;
+    if (indexingInProgress.has(statusKey)) {
+        console.log('Page is already being indexed:', tab.url);
+        return;
+    }
+    
+    // Check if URL is confidential
+    const confidentialCheck = isConfidentialSite(tab.url);
+    if (confidentialCheck.isConfidential) {
+        console.log('Skipping confidential site:', tab.url);
+        
+        // Create the message object
+        const message = {
+            type: 'indexing_status',
+            status: 'skipped',
+            url: tab.url,
+            error: `This is a confidential site (matched pattern: ${confidentialCheck.matchedPattern})`
+        };
+
+        // Check if popup is open before sending message
+        const views = chrome.extension.getViews({ type: 'popup' });
+        if (views.length > 0) {
+            try {
+                console.log('Sending confidential site notification:', message);
+                await chrome.runtime.sendMessage(message);
+                console.log('Successfully sent confidential site notification');
+            } catch (error) {
+                console.error('Error sending confidential site notification:', error);
+                // Store message for later
+                chrome.storage.local.get(['pendingMessages'], (result) => {
+                    const pendingMessages = result.pendingMessages || [];
+                    pendingMessages.push(message);
+                    chrome.storage.local.set({ pendingMessages });
+                });
+            }
+        } else {
+            console.log('Popup not open, storing message for later');
+            // Store the message to be sent when popup opens
+            chrome.storage.local.get(['pendingMessages'], (result) => {
+                const pendingMessages = result.pendingMessages || [];
+                pendingMessages.push(message);
+                chrome.storage.local.set({ pendingMessages });
+            });
+        }
+        return;
+    }
     
     try {
-        // Check if page is confidential first
-        if (isConfidentialSite(url)) {
-            console.log('Page is confidential, skipping:', url);
-            await sendIndexingStatus('skipped', url);
-            return;
-        }
-
-        // Send started notification
-        await sendIndexingStatus('started', url);
+        // Send started status
+        await sendIndexingStatus('started', tab.url);
         
         // Get page content
         const content = await getPageContent(tab);
-        if (!content || content.length === 0) {
+        if (!content) {
             throw new Error('No content extracted from page');
         }
-        console.log('Got page content, length:', content.length);
         
-        // Send to backend for indexing
-        console.log('Sending to backend for indexing:', url);
-        const response = await fetch(`${BACKEND_URL}/index`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                url: url,
-                title: tab.title || '',
-                content: content
-            })
-        });
+        // Process the content
+        await processPageContent(tab.url, content);
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        console.log('Backend indexing response:', result);
-        
-        if (result.success) {
-            console.log('Indexing completed successfully:', url);
-            await sendIndexingStatus('completed', url);
-        } else {
-            throw new Error(result.error || 'Unknown error from backend');
-        }
+        // Send completed status
+        await sendIndexingStatus('completed', tab.url);
     } catch (error) {
         console.error('Error indexing page:', error);
-        await sendIndexingStatus('error', url, error.message);
+        await sendIndexingStatus('error', tab.url, error.message);
     }
 }
 
-// Listen for tab updates to index new pages
+// Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // Only index when the page is fully loaded and has a valid URL
-    if (changeInfo.status === 'complete' && 
-        tab.url && 
-        tab.url.startsWith('http') && 
-        !tab.url.includes('chrome-extension://')) {
-        
-        console.log('Tab updated, checking if should index:', tab.url);
-        
-        // Check if we should index this page
-        if (!isConfidentialSite(tab.url)) {
-            console.log('Starting indexing for page:', tab.url);
-            indexPage(tab).catch(err => {
-                console.error('Error in tab update handler:', err);
-            });
-        } else {
-            console.log('Skipping confidential page:', tab.url);
-            sendIndexingStatus('skipped', tab.url);
+    // Only process when the page is fully loaded
+    if (changeInfo.status === 'complete' && tab.url) {
+        // Check if the URL is valid and not a chrome:// URL
+        if (tab.url.startsWith('http')) {
+            indexPage(tab);
         }
+    }
+});
+
+// Listen for popup opening
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'popup') {
+        console.log('Popup connected');
+        
+        // Send any pending messages
+        chrome.storage.local.get(['pendingMessages'], (result) => {
+            const pendingMessages = result.pendingMessages || [];
+            if (pendingMessages.length > 0) {
+                console.log('Sending pending messages:', pendingMessages.length);
+                pendingMessages.forEach(message => {
+                    port.postMessage(message);
+                });
+                // Clear pending messages
+                chrome.storage.local.set({ pendingMessages: [] });
+            }
+        });
+        
+        port.onDisconnect.addListener(() => {
+            console.log('Popup disconnected');
+        });
     }
 });
 
@@ -730,6 +746,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ success: true });
         }
         return true; // Indicate async response
+    }
+    
+    if (message.action === 'getPendingHighlight') {
+        // Return any pending highlight text
+        chrome.storage.local.get(['pendingHighlight'], (result) => {
+            sendResponse(result.pendingHighlight || { text: null });
+        });
+        return true;
     }
 });
 
