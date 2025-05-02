@@ -87,50 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Listen for messages from background script
     port.onMessage.addListener((message) => {
-        console.log('Received message from background:', message);
-        
-        if (message.type === 'indexing_status') {
-            // Update the status display
-            updateStatus(message.status, message.url, message.error);
-            
-            // Add notification
-            let notificationType = 'info';
-            let notificationMessage = '';
-            
-            switch (message.status) {
-                case 'started':
-                    notificationMessage = `Started indexing: ${message.url}`;
-                    notificationType = 'info';
-                    break;
-                case 'completed':
-                    notificationMessage = `Successfully indexed: ${message.url}`;
-                    notificationType = 'success';
-                    break;
-                case 'error':
-                    notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
-                    notificationType = 'error';
-                    break;
-                case 'skipped':
-                    notificationMessage = `Skipped confidential page: ${message.url}`;
-                    notificationType = 'error';
-                    // Ensure the error message is displayed
-                    if (message.error) {
-                        const errorElement = document.getElementById('error-message');
-                        if (errorElement) {
-                            errorElement.textContent = message.error;
-                            errorElement.style.display = 'block';
-                            console.log('Displayed error message for confidential site:', message.error);
-                        }
-                    }
-                    break;
-                default:
-                    notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
-                    notificationType = 'info';
-            }
-            
-            // Add notification
-            addNotification(notificationMessage, notificationType);
-        }
+        console.log('Popup received port message:', message);
+        handleIndexingStatus(message);
     });
     
     // Handle disconnection
@@ -141,52 +99,86 @@ document.addEventListener('DOMContentLoaded', function() {
     // Also listen for direct messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('Popup received direct message:', message);
-        
         if (message.type === 'indexing_status') {
-            // Update the status display
-            updateStatus(message.status, message.url, message.error);
-            
-            // Add notification
-            let notificationType = 'info';
-            let notificationMessage = '';
-            
-            switch (message.status) {
-                case 'started':
-                    notificationMessage = `Started indexing: ${message.url}`;
-                    notificationType = 'info';
-                    break;
-                case 'completed':
-                    notificationMessage = `Successfully indexed: ${message.url}`;
-                    notificationType = 'success';
-                    break;
-                case 'error':
-                    notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
-                    notificationType = 'error';
-                    break;
-                case 'skipped':
-                    notificationMessage = `Skipped confidential page: ${message.url}`;
-                    notificationType = 'error';
-                    // Ensure the error message is displayed
-                    if (message.error) {
-                        const errorElement = document.getElementById('error-message');
-                        if (errorElement) {
-                            errorElement.textContent = message.error;
-                            errorElement.style.display = 'block';
-                            console.log('Displayed error message for confidential site:', message.error);
-                        }
-                    }
-                    break;
-                default:
-                    notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
-                    notificationType = 'info';
-            }
-            
-            // Add notification
-            addNotification(notificationMessage, notificationType);
-            sendResponse({ received: true });
+            handleIndexingStatus(message);
         }
+        sendResponse({ received: true });
         return true; // Keep the message channel open for async response
     });
+
+    // Function to handle indexing status messages
+    function handleIndexingStatus(message) {
+        console.log('Processing indexing status message:', message);
+        // Update the status display
+        updateStatus(message.status, message.url, message.error);
+        
+        // Add notification
+        let notificationType = 'info';
+        let notificationMessage = '';
+        
+        switch (message.status) {
+            case 'skipped':
+                console.log('Processing skipped status for confidential site');
+                notificationMessage = `Skipped confidential page: ${message.url}`;
+                notificationType = 'error';
+                // Ensure the error message is displayed
+                if (message.error) {
+                    const errorElement = document.getElementById('error-message');
+                    if (errorElement) {
+                        errorElement.textContent = message.error;
+                        errorElement.style.display = 'block';
+                        console.log('Displayed error message for confidential site:', message.error);
+                    } else {
+                        console.error('Error element not found in DOM');
+                    }
+                }
+                break;
+            case 'started':
+                notificationMessage = `Started indexing: ${message.url}`;
+                notificationType = 'info';
+                break;
+            case 'completed':
+                notificationMessage = `Successfully indexed: ${message.url}`;
+                notificationType = 'success';
+                break;
+            case 'error':
+                notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
+                notificationType = 'error';
+                break;
+            default:
+                notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
+                notificationType = 'info';
+        }
+        
+        // Add notification
+        console.log('Adding notification:', notificationMessage, 'Type:', notificationType);
+        addNotification(notificationMessage, notificationType);
+    }
+
+    // Add test button to settings tab
+    const settingsTab = document.getElementById('settings-tab');
+    const testButton = document.createElement('button');
+    testButton.textContent = 'Test Confidential Site Detection';
+    testButton.onclick = async () => {
+        const testUrl = 'https://mail.google.com';
+        console.log('Testing confidential site detection for:', testUrl);
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: 'testConfidentialSite',
+                url: testUrl
+            });
+            console.log('Test response:', response);
+            if (response.isConfidential) {
+                addNotification(`Test successful: ${testUrl} is confidential (matched: ${response.matchedPattern})`, 'success');
+            } else {
+                addNotification(`Test failed: ${testUrl} was not detected as confidential`, 'error');
+            }
+        } catch (error) {
+            console.error('Test error:', error);
+            addNotification(`Test error: ${error.message}`, 'error');
+        }
+    };
+    settingsTab.insertBefore(testButton, settingsTab.firstChild);
 });
 
 // Function to add a notification
@@ -724,6 +716,13 @@ function updateStatus(status, url, error = null) {
                 errorElement.textContent = error;
                 errorElement.style.display = 'block';
             }
+            // Reset status after 3 seconds
+            setTimeout(() => {
+                statusElement.className = 'idle';
+                statusText.textContent = 'Ready to search';
+                errorElement.textContent = '';
+                errorElement.style.display = 'none';
+            }, 3000);
             break;
             
         default:
@@ -732,4 +731,22 @@ function updateStatus(status, url, error = null) {
     }
     
     console.log('Updated status display:', status, 'for URL:', url);
+}
+
+async function getConfidentialSites() {
+    console.log('Requesting confidential sites list...');
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'getConfidentialSites' });
+        console.log('Got confidential sites response:', response);
+        if (response && response.sites) {
+            console.log('Loaded', response.sites.length, 'confidential sites');
+            return response.sites;
+        } else {
+            console.warn('No sites in response:', response);
+            return [];
+        }
+    } catch (error) {
+        console.error('Error getting confidential sites:', error);
+        return [];
+    }
 } 

@@ -313,8 +313,14 @@ function isConfidentialSite(url) {
         const hostname = urlObj.hostname;
         const pathname = urlObj.pathname;
         
+        console.log('Checking if site is confidential:', url);
+        console.log('Hostname:', hostname);
+        console.log('Pathname:', pathname);
+        console.log('Available patterns:', confidentialSites);
+        
         // Check if the hostname matches any confidential site
         for (const site of confidentialSites) {
+            console.log('Checking pattern:', site);
             if (hostname.includes(site) || pathname.includes(site)) {
                 console.log(`Site is confidential: ${url} (matched pattern: ${site})`);
                 return {
@@ -579,9 +585,16 @@ async function sendIndexingStatus(status, url, error = null) {
 // Function to index a page
 async function indexPage(tab) {
     if (!tab || !tab.url) {
-        console.error('Invalid tab or URL');
+        console.error('Invalid tab or URL:', tab);
         return;
     }
+
+    console.log('Starting to index page:', {
+        url: tab.url,
+        id: tab.id,
+        active: tab.active,
+        title: tab.title
+    });
 
     // Check if page is already being indexed
     const statusKey = `${tab.url}-started`;
@@ -603,22 +616,49 @@ async function indexPage(tab) {
             error: `This is a confidential site (matched pattern: ${confidentialCheck.matchedPattern})`
         };
 
-        // Send to popup
-        chrome.runtime.sendMessage(message, (response) => {
-            if (chrome.runtime.lastError) {
-                console.log('Popup not ready, storing message');
-                // Store the message to be sent when popup opens
-                chrome.storage.local.get(['pendingMessages'], (result) => {
-                    const pendingMessages = result.pendingMessages || [];
-                    pendingMessages.push(message);
-                    chrome.storage.local.set({ pendingMessages }, () => {
-                        console.log('Stored pending message for confidential site:', message);
+        console.log('Sending confidential site message:', message);
+
+        // Try both direct message and port message
+        try {
+            // Send direct message
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.log('Direct message failed, storing for later:', chrome.runtime.lastError);
+                    // Store the message to be sent when popup opens
+                    chrome.storage.local.get(['pendingMessages'], (result) => {
+                        const pendingMessages = result.pendingMessages || [];
+                        pendingMessages.push(message);
+                        chrome.storage.local.set({ pendingMessages }, () => {
+                            console.log('Stored pending message for confidential site:', message);
+                        });
                     });
+                } else {
+                    console.log('Direct message sent successfully');
+                }
+            });
+
+            // Also try sending through any open ports
+            chrome.runtime.getContexts({ contextTypes: ['POPUP'] }, (contexts) => {
+                contexts.forEach(context => {
+                    if (context.port) {
+                        try {
+                            context.port.postMessage(message);
+                            console.log('Message sent through port');
+                        } catch (error) {
+                            console.error('Error sending through port:', error);
+                        }
+                    }
                 });
-            } else {
-                console.log('Sent confidential site notification');
-            }
-        });
+            });
+        } catch (error) {
+            console.error('Error sending confidential site notification:', error);
+            // Store message for later
+            chrome.storage.local.get(['pendingMessages'], (result) => {
+                const pendingMessages = result.pendingMessages || [];
+                pendingMessages.push(message);
+                chrome.storage.local.set({ pendingMessages });
+            });
+        }
         return;
     }
     
@@ -644,13 +684,59 @@ async function indexPage(tab) {
 }
 
 // Listen for tab updates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    console.log('Tab updated:', {
+        tabId,
+        status: changeInfo.status,
+        url: tab.url,
+        active: tab.active,
+        changeInfo
+    });
+    
     // Only process when the page is fully loaded
     if (changeInfo.status === 'complete' && tab.url) {
+        console.log('Page loaded, checking URL:', tab.url);
+        
         // Check if the URL is valid and not a chrome:// URL
         if (tab.url.startsWith('http')) {
-            indexPage(tab);
+            console.log('Valid URL detected, starting index process');
+            
+            // Get the active tab to ensure we're processing the right one
+            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            console.log('Active tab:', activeTab?.url);
+            
+            // Only process if this is the active tab
+            if (activeTab && activeTab.id === tabId) {
+                console.log('Processing active tab:', tab.url);
+                // Add a small delay to ensure the page is fully loaded
+                setTimeout(() => {
+                    indexPage(tab);
+                }, 1000);
+            } else {
+                console.log('Skipping non-active tab:', tab.url);
+            }
+        } else {
+            console.log('Skipping non-HTTP URL:', tab.url);
         }
+    } else {
+        console.log('Skipping update - status:', changeInfo.status, 'URL:', tab.url);
+    }
+});
+
+// Also listen for tab activation
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    console.log('Tab activated:', activeInfo);
+    
+    // Get the tab details
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    console.log('Activated tab details:', tab);
+    
+    if (tab.url && tab.url.startsWith('http')) {
+        console.log('Processing newly activated tab:', tab.url);
+        // Add a small delay to ensure the page is fully loaded
+        setTimeout(() => {
+            indexPage(tab);
+        }, 1000);
     }
 });
 
@@ -758,7 +844,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     if (message.action === 'getConfidentialSites') {
+        console.log('Sending confidential sites list:', confidentialSites);
         sendResponse({ sites: confidentialSites });
+        return true; // Keep the message channel open for async response
     }
     
     if (message.action === 'init') {
@@ -784,6 +872,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.storage.local.get(['pendingHighlight'], (result) => {
             sendResponse(result.pendingHighlight || { text: null });
         });
+        return true;
+    }
+
+    if (message.action === 'testConfidentialSite') {
+        console.log('Testing confidential site detection for:', message.url);
+        const result = isConfidentialSite(message.url);
+        console.log('Test result:', result);
+        sendResponse(result);
         return true;
     }
 });
