@@ -137,6 +137,56 @@ document.addEventListener('DOMContentLoaded', function() {
     port.onDisconnect.addListener(() => {
         console.log('Disconnected from background script');
     });
+
+    // Also listen for direct messages
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        console.log('Popup received direct message:', message);
+        
+        if (message.type === 'indexing_status') {
+            // Update the status display
+            updateStatus(message.status, message.url, message.error);
+            
+            // Add notification
+            let notificationType = 'info';
+            let notificationMessage = '';
+            
+            switch (message.status) {
+                case 'started':
+                    notificationMessage = `Started indexing: ${message.url}`;
+                    notificationType = 'info';
+                    break;
+                case 'completed':
+                    notificationMessage = `Successfully indexed: ${message.url}`;
+                    notificationType = 'success';
+                    break;
+                case 'error':
+                    notificationMessage = `Error indexing ${message.url}: ${message.error || 'Unknown error'}`;
+                    notificationType = 'error';
+                    break;
+                case 'skipped':
+                    notificationMessage = `Skipped confidential page: ${message.url}`;
+                    notificationType = 'error';
+                    // Ensure the error message is displayed
+                    if (message.error) {
+                        const errorElement = document.getElementById('error-message');
+                        if (errorElement) {
+                            errorElement.textContent = message.error;
+                            errorElement.style.display = 'block';
+                            console.log('Displayed error message for confidential site:', message.error);
+                        }
+                    }
+                    break;
+                default:
+                    notificationMessage = `Unknown status for ${message.url}: ${message.status}`;
+                    notificationType = 'info';
+            }
+            
+            // Add notification
+            addNotification(notificationMessage, notificationType);
+            sendResponse({ received: true });
+        }
+        return true; // Keep the message channel open for async response
+    });
 });
 
 // Function to add a notification

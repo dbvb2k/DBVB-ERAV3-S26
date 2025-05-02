@@ -70,10 +70,25 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         'drive.google.com',
         'docs.google.com',
         'sheets.google.com',
+        'slides.google.com',
+        'calendar.google.com',
         'bank',
+        'banking',
         'account',
         'login',
-        'signin'
+        'signin',
+        'paypal.com',
+        'venmo.com',
+        'healthcare',
+        'medical',
+        'payments',
+        'wallet',
+        'stripe.com',
+        'github.com/settings',
+        'facebook.com/messages',
+        'messenger.com',
+        'twitter.com/messages',
+        'linkedin.com/messaging'
       ];
       
       chrome.storage.local.set({ confidentialSites: defaultSites }, () => {
@@ -232,10 +247,25 @@ async function loadConfidentialSites() {
           'drive.google.com',
           'docs.google.com',
           'sheets.google.com',
+          'slides.google.com',
+          'calendar.google.com',
           'bank',
+          'banking',
           'account',
           'login',
-          'signin'
+          'signin',
+          'paypal.com',
+          'venmo.com',
+          'healthcare',
+          'medical',
+          'payments',
+          'wallet',
+          'stripe.com',
+          'github.com/settings',
+          'facebook.com/messages',
+          'messenger.com',
+          'twitter.com/messages',
+          'linkedin.com/messaging'
         ];
         // Save default list
         chrome.storage.local.set({ confidentialSites });
@@ -516,25 +546,28 @@ async function sendIndexingStatus(status, url, error = null) {
             error: error
         };
 
-        // Check if popup is open before sending message
-        const views = chrome.extension.getViews({ type: 'popup' });
-        if (views.length > 0) {
-            // Send to popup
-            await chrome.runtime.sendMessage(message);
-            console.log('Sent status message:', status, 'for URL:', url);
-        } else {
-            console.log('Popup not open, storing message for later');
-            // Store the message to be sent when popup opens
-            chrome.storage.local.get(['pendingMessages'], (result) => {
-                const pendingMessages = result.pendingMessages || [];
-                pendingMessages.push(message);
-                chrome.storage.local.set({ pendingMessages });
-            });
-        }
+        // Send to popup
+        chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+                console.log('Popup not ready, storing message');
+                // Store the message to be sent when popup opens
+                chrome.storage.local.get(['pendingMessages'], (result) => {
+                    const pendingMessages = result.pendingMessages || [];
+                    pendingMessages.push(message);
+                    chrome.storage.local.set({ pendingMessages });
+                });
+            } else {
+                console.log('Sent status message:', status, 'for URL:', url);
+            }
+        });
     } catch (error) {
         console.error('Error sending indexing status:', error);
-        // Don't throw the error, just log it
-        console.log('Failed to send status message, will retry when popup opens');
+        // Store message for later
+        chrome.storage.local.get(['pendingMessages'], (result) => {
+            const pendingMessages = result.pendingMessages || [];
+            pendingMessages.push(message);
+            chrome.storage.local.set({ pendingMessages });
+        });
     } finally {
         // Remove from tracking set after a delay
         setTimeout(() => {
@@ -570,31 +603,22 @@ async function indexPage(tab) {
             error: `This is a confidential site (matched pattern: ${confidentialCheck.matchedPattern})`
         };
 
-        // Check if popup is open before sending message
-        const views = chrome.extension.getViews({ type: 'popup' });
-        if (views.length > 0) {
-            try {
-                console.log('Sending confidential site notification:', message);
-                await chrome.runtime.sendMessage(message);
-                console.log('Successfully sent confidential site notification');
-            } catch (error) {
-                console.error('Error sending confidential site notification:', error);
-                // Store message for later
+        // Send to popup
+        chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+                console.log('Popup not ready, storing message');
+                // Store the message to be sent when popup opens
                 chrome.storage.local.get(['pendingMessages'], (result) => {
                     const pendingMessages = result.pendingMessages || [];
                     pendingMessages.push(message);
-                    chrome.storage.local.set({ pendingMessages });
+                    chrome.storage.local.set({ pendingMessages }, () => {
+                        console.log('Stored pending message for confidential site:', message);
+                    });
                 });
+            } else {
+                console.log('Sent confidential site notification');
             }
-        } else {
-            console.log('Popup not open, storing message for later');
-            // Store the message to be sent when popup opens
-            chrome.storage.local.get(['pendingMessages'], (result) => {
-                const pendingMessages = result.pendingMessages || [];
-                pendingMessages.push(message);
-                chrome.storage.local.set({ pendingMessages });
-            });
-        }
+        });
         return;
     }
     
@@ -641,10 +665,17 @@ chrome.runtime.onConnect.addListener((port) => {
             if (pendingMessages.length > 0) {
                 console.log('Sending pending messages:', pendingMessages.length);
                 pendingMessages.forEach(message => {
-                    port.postMessage(message);
+                    try {
+                        port.postMessage(message);
+                        console.log('Sent pending message:', message);
+                    } catch (error) {
+                        console.error('Error sending pending message:', error);
+                    }
                 });
                 // Clear pending messages
-                chrome.storage.local.set({ pendingMessages: [] });
+                chrome.storage.local.set({ pendingMessages: [] }, () => {
+                    console.log('Cleared pending messages');
+                });
             }
         });
         

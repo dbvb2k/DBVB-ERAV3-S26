@@ -168,8 +168,8 @@ function highlightText(searchText) {
         
         console.log(`Total matches found: ${matchCount}`);
         
-        // Scroll to first match if any found
-        if (matchCount > 0) {
+        // Scroll to first match if any found, but only if this is the initial highlight
+        if (matchCount > 0 && !document.querySelector('.search-match')) {
             const firstMatch = document.querySelector('.search-match');
             if (firstMatch) {
                 firstMatch.scrollIntoView({
