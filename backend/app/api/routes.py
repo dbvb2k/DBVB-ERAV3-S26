@@ -261,4 +261,25 @@ def get_stats():
         })
     except Exception as e:
         logger.error(f'Error getting stats: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/check-indexed', methods=['POST'])
+def check_indexed():
+    """Check if a page is already indexed."""
+    init_services()
+    data = request.get_json()
+    
+    if not data or 'url' not in data:
+        return jsonify({'error': 'Missing URL'}), 400
+    
+    try:
+        # Check if URL exists in the index
+        is_indexed = faiss_index.contains_url(data['url'])
+        
+        return jsonify({
+            'success': True,
+            'isIndexed': is_indexed
+        })
+    except Exception as e:
+        logger.error(f'Error checking if page is indexed: {str(e)}')
         return jsonify({'error': str(e)}), 500 

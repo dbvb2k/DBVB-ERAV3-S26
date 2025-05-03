@@ -118,16 +118,20 @@ document.addEventListener('DOMContentLoaded', function() {
         
         switch (message.status) {
             case 'skipped':
-                console.log('Processing skipped status for confidential site');
-                notificationMessage = `Skipped confidential page: ${message.url}`;
-                notificationType = 'error';
+                if (message.error && message.error === 'Page already indexed') {
+                    notificationMessage = `Page skipped: already indexed (${message.url})`;
+                    notificationType = 'info';
+                } else {
+                    notificationMessage = `Skipped confidential page: ${message.url}`;
+                    notificationType = 'error';
+                }
                 // Ensure the error message is displayed
                 if (message.error) {
                     const errorElement = document.getElementById('error-message');
                     if (errorElement) {
                         errorElement.textContent = message.error;
                         errorElement.style.display = 'block';
-                        console.log('Displayed error message for confidential site:', message.error);
+                        console.log('Displayed error message for skipped page:', message.error);
                     } else {
                         console.error('Error element not found in DOM');
                     }

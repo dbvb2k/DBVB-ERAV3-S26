@@ -82,108 +82,116 @@ function highlightText(searchText) {
         return 0;
     }
     
-    console.log('Starting highlight for text:', searchText);
-    
-    try {
-        // Remove existing highlights first
-        removeHighlights();
+    // Check if highlighting is enabled
+    chrome.storage.local.get(['highlightEnabled'], function(result) {
+        if (!result.highlightEnabled) {
+            console.log('Highlighting is disabled, skipping highlight');
+            return 0;
+        }
         
-        // Create a temporary div to hold the search text for exact matching
-        const tempDiv = document.createElement('div');
-        tempDiv.textContent = searchText;
-        const exactSearchText = tempDiv.textContent;
+        console.log('Starting highlight for text:', searchText);
         
-        const searchRegex = new RegExp(escapeRegExp(exactSearchText), 'gi');
-        let matchCount = 0;
-        
-        // Get all text nodes in the document body
-        const allNodes = [];
-        const walk = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            {
-                acceptNode: function(node) {
-                    // Skip script, style, and already highlighted nodes
-                    const parent = node.parentNode;
-                    if (!parent) return NodeFilter.FILTER_REJECT;
-                    
-                    if (parent.nodeName === 'SCRIPT' || 
-                        parent.nodeName === 'STYLE' || 
-                        parent.nodeName === 'NOSCRIPT' ||
-                        parent.classList.contains('search-result-highlight') ||
-                        parent.classList.contains('search-match')) {
-                        return NodeFilter.FILTER_REJECT;
+        try {
+            // Remove existing highlights first
+            removeHighlights();
+            
+            // Create a temporary div to hold the search text for exact matching
+            const tempDiv = document.createElement('div');
+            tempDiv.textContent = searchText;
+            const exactSearchText = tempDiv.textContent;
+            
+            const searchRegex = new RegExp(escapeRegExp(exactSearchText), 'gi');
+            let matchCount = 0;
+            
+            // Get all text nodes in the document body
+            const allNodes = [];
+            const walk = document.createTreeWalker(
+                document.body,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function(node) {
+                        // Skip script, style, and already highlighted nodes
+                        const parent = node.parentNode;
+                        if (!parent) return NodeFilter.FILTER_REJECT;
+                        
+                        if (parent.nodeName === 'SCRIPT' || 
+                            parent.nodeName === 'STYLE' || 
+                            parent.nodeName === 'NOSCRIPT' ||
+                            parent.classList.contains('search-result-highlight') ||
+                            parent.classList.contains('search-match')) {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                        
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                }
+            );
+            
+            while (walk.nextNode()) {
+                allNodes.push(walk.currentNode);
+            }
+            
+            // Process each text node
+            allNodes.forEach((textNode) => {
+                const text = textNode.textContent;
+                if (!text.match(searchRegex)) return;
+                
+                const fragment = document.createDocumentFragment();
+                let lastIndex = 0;
+                let match;
+                
+                searchRegex.lastIndex = 0; // Reset regex state
+                
+                while ((match = searchRegex.exec(text)) !== null) {
+                    // Add text before the match
+                    if (match.index > lastIndex) {
+                        fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
                     }
                     
-                    return NodeFilter.FILTER_ACCEPT;
-                }
-            }
-        );
-        
-        while (walk.nextNode()) {
-            allNodes.push(walk.currentNode);
-        }
-        
-        // Process each text node
-        allNodes.forEach((textNode) => {
-            const text = textNode.textContent;
-            if (!text.match(searchRegex)) return;
-            
-            const fragment = document.createDocumentFragment();
-            let lastIndex = 0;
-            let match;
-            
-            searchRegex.lastIndex = 0; // Reset regex state
-            
-            while ((match = searchRegex.exec(text)) !== null) {
-                // Add text before the match
-                if (match.index > lastIndex) {
-                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                    // Create highlighted match
+                    const span = document.createElement('span');
+                    span.className = 'search-match';
+                    span.style.backgroundColor = '#ffeb3b';
+                    span.style.color = '#000';
+                    span.style.fontWeight = 'bold';
+                    span.style.padding = '2px 4px';
+                    span.style.borderRadius = '3px';
+                    span.style.margin = '0 1px';
+                    span.textContent = match[0];
+                    
+                    fragment.appendChild(span);
+                    lastIndex = match.index + match[0].length;
+                    matchCount++;
                 }
                 
-                // Create highlighted match
-                const span = document.createElement('span');
-                span.className = 'search-match';
-                span.style.backgroundColor = '#ffeb3b';
-                span.style.color = '#000';
-                span.style.fontWeight = 'bold';
-                span.style.padding = '2px 4px';
-                span.style.borderRadius = '3px';
-                span.style.margin = '0 1px';
-                span.textContent = match[0];
+                // Add remaining text
+                if (lastIndex < text.length) {
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+                }
                 
-                fragment.appendChild(span);
-                lastIndex = match.index + match[0].length;
-                matchCount++;
+                // Replace original text node with our fragment
+                textNode.parentNode.replaceChild(fragment, textNode);
+            });
+            
+            console.log(`Total matches found: ${matchCount}`);
+            
+            // Scroll to first match if any found, but only if this is the initial highlight
+            if (matchCount > 0 && !document.querySelector('.search-match')) {
+                const firstMatch = document.querySelector('.search-match');
+                if (firstMatch) {
+                    firstMatch.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                }
             }
             
-            // Add remaining text
-            if (lastIndex < text.length) {
-                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-            }
-            
-            // Replace original text node with our fragment
-            textNode.parentNode.replaceChild(fragment, textNode);
-        });
-        
-        console.log(`Total matches found: ${matchCount}`);
-        
-        // Scroll to first match if any found, but only if this is the initial highlight
-        if (matchCount > 0 && !document.querySelector('.search-match')) {
-            const firstMatch = document.querySelector('.search-match');
-            if (firstMatch) {
-                firstMatch.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center'
-                });
-            }
+            return matchCount;
+        } catch (error) {
+            console.error('Error in highlightText:', error);
+            return 0;
         }
-        
-        return matchCount;
-    } catch (error) {
-        console.error('Error in highlightText:', error);
-        return 0;
-    }
+    });
 }
 
 // Function to remove existing highlights

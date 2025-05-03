@@ -603,7 +603,35 @@ async function indexPage(tab) {
         return;
     }
     
-    // Check if URL is confidential
+    // Check if the page has already been indexed
+    try {
+        const response = await fetch(`${BACKEND_URL}/check-indexed`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: tab.url })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        if (result.success && result.isIndexed) {
+            console.log('Page already indexed:', tab.url);
+            // Send a status message to indicate the page was skipped
+            await sendIndexingStatus('skipped', tab.url, 'Page already indexed');
+            return;
+        }
+    } catch (error) {
+        console.error('Error checking if page is indexed:', error);
+        // Send error status and return instead of continuing with indexing
+        await sendIndexingStatus('error', tab.url, `Error checking if page is indexed: ${error.message}`);
+        return;
+    }
+    
+    // Check if URL is confidential - only do this if the page is not already indexed
     const confidentialCheck = isConfidentialSite(tab.url);
     if (confidentialCheck.isConfidential) {
         console.log('Skipping confidential site:', tab.url);

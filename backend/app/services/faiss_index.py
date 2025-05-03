@@ -106,4 +106,18 @@ class FaissIndex:
             logger.info("Index cleared")
         except Exception as e:
             logger.error(f"Error clearing index: {str(e)}", exc_info=True)
-            raise 
+            raise
+
+    def contains_url(self, url: str) -> bool:
+        """Check if a URL is already indexed."""
+        try:
+            # Check if URL exists in metadata
+            for doc in self.metadata.values():
+                if doc.get('url') == url:
+                    logger.info(f"URL already indexed: {url}")
+                    return True
+            logger.info(f"URL not found in index: {url}")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking URL in index: {str(e)}", exc_info=True)
+            return False 
